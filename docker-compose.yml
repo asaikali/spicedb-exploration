@@ -1,0 +1,74 @@
+# blow away all the volumes associated with this compose file
+#
+# docker compose down --volumes
+#
+version: '3.8'
+
+volumes:
+  spicedb_postgres:
+  spicedb_pgadmin:
+
+services:
+  postgres:
+    container_name: spicedb_postgres
+    labels:
+      # see https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#features.docker-compose.custom-images for details
+      org.springframework.boot.service-connection: postgres
+    image: "postgres:16"
+    environment:
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "password"
+      PGDATA: "/data/postgres"
+    volumes:
+      - spicedb_postgres:/data/postgres
+      - ./db/docker_postgres_init.sql:/docker-entrypoint-initdb.d/docker_postgres_init.sql
+    ports:
+      - "25432:5432"
+    restart: unless-stopped
+  
+  pgadmin:
+    container_name: spicedb_pgadmin
+    labels:
+      org.springframework.boot.ignore: true
+    image: "dpage/pgadmin4:8.3"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    volumes:
+      - spicedb_pgadmin:/var/lib/pgadmin
+      - ./db/docker_pgadmin_servers.json:/pgadmin4/servers.json
+    ports:
+      - "25433:80"
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - "/bin/echo 'postgres:5432:*:postgres:password' > /tmp/pgpassfile && chmod 600 /tmp/pgpassfile && /entrypoint.sh"
+    restart: unless-stopped
+    
+
+  spicedb:
+    image: "authzed/spicedb"
+    command: "serve"
+    restart: "always"
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+      - "50051:50051"
+    environment:
+      - "SPICEDB_GRPC_PRESHARED_KEY=foobar"
+      - "SPICEDB_DATASTORE_ENGINE=postgres"
+      - "SPICEDB_DATASTORE_CONN_URI=postgres://postgres:password@postgres:5432/spicedb?sslmode=disable"
+    depends_on:
+      - "migrate"
+
+  migrate:
+    image: "authzed/spicedb"
+    command: "migrate head"
+    restart: "on-failure"
+    environment:
+      - "SPICEDB_DATASTORE_ENGINE=postgres"
+      - "SPICEDB_DATASTORE_CONN_URI=postgres://postgres:password@postgres:5432/spicedb?sslmode=disable"
+    depends_on:
+      - "postgres"
